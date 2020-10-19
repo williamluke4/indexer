@@ -744,7 +744,7 @@
     "@ethersproject/contracts" "^5.0.3"
     ethers "^5.0.9"
 
-"@graphprotocol/receipt-manager@next.55308d4":
+"@graphprotocol/receipt-manager@next":
   version "0.0.2-next.55308d4.59"
   resolved "https://registry.yarnpkg.com/@graphprotocol/receipt-manager/-/receipt-manager-0.0.2-next.55308d4.59.tgz#7d1ae25e87dfc5760d273f6e41dfb3be1821bc0a"
   integrity sha512-MRxkSqsOWKv9NwXmRUUBXQkGhBbd5GjjkC3GA3vyYKxRBLHoUXibM5L8au7vMOQc0doHqDB7UDzZilo9Berlqw==
