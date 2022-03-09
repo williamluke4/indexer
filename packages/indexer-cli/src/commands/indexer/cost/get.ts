@@ -50,8 +50,8 @@ module.exports = {
       : ['deployment', 'model', 'variables']
     const rawDeployment = ['model', 'variables'].includes(first) ? second : first
 
-    try{
-      if (rawDeployment !== 'all') {await validateDeploymentID(rawDeployment)}
+    try {
+      if (rawDeployment !== 'all' && rawDeployment !== 'global') {await validateDeploymentID(rawDeployment)}
     } catch (error) {
       print.error(error.toString())
       process.exitCode = 1

@@ -44,8 +44,8 @@ module.exports = {
       return
     }
 
-    try{
-      await validateDeploymentID(deployment)
+    try {
+      if (deployment != 'global') { await validateDeploymentID(deployment) }
     } catch (error) {
       print.error(error.toString())
       process.exitCode = 1
