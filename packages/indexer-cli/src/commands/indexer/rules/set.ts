@@ -4,9 +4,10 @@ import { partition } from '@thi.ng/iterators'
 
 import { loadValidatedConfig } from '../../../config'
 import { createIndexerManagementClient } from '../../../client'
-import { fixParameters } from '../../../command-helpers'
+import { fixParameters, suggestCommands } from '../../../command-helpers'
 import { parseIndexingRule, setIndexingRule, printIndexingRules } from '../../../rules'
-import { processIdentifier } from '@graphprotocol/indexer-common'
+import { processIdentifier, SubgraphIdentifierType } from '@graphprotocol/indexer-common'
+import { stringify } from 'yaml'
 
 const HELP = `
 ${chalk.bold('graph indexer rules set')} [options] global          <key1> <value1> ...
@@ -46,6 +47,7 @@ module.exports = {
         global: true,
       })
       const config = loadValidatedConfig()
+      const client = await createIndexerManagementClient({ url: config.api })
 
       //// Parse key/value pairs
 
@@ -61,23 +63,34 @@ module.exports = {
         return
       }
 
-      // Turn the array into an object, add `identifier` and `identifierType` keys
-      const inputRule = parseIndexingRule({
-        ...Object.fromEntries([...partition(2, 2, kvs)]),
-        identifier,
-        identifierType,
-      })
-
-      if (inputRule.parallelAllocations && inputRule.parallelAllocations >= 2) {
-        print.error(
-          'Parallel allocations are soon to be fully deprecated. Please set parallel allocations to 1 for all your indexing rules',
+      // Turn input into an indexing rule object, add `identifier` and `identifierType` keys
+      try {
+        const inputRule = parseIndexingRule({
+          ...Object.fromEntries([...partition(2, 2, kvs)]),
+          identifier,
+          identifierType,
+        })
+        if (inputRule.parallelAllocations && inputRule.parallelAllocations >= 2) {
+          print.error(
+            'Parallel allocations are soon to be fully deprecated. Please set parallel allocations to 1 for all your indexing rules',
+          )
+          process.exitCode = 1
+        }
+        const rule = await setIndexingRule(client, inputRule)
+        printIndexingRules(print, outputFormat, identifier, rule, [])
+      } catch (error) {
+        // Failed to parse input, make suggestions
+        const valid_commands = Object.keys(
+          await setIndexingRule(client, {
+            identifier: 'global',
+            identifierType: SubgraphIdentifierType.GROUP,
+          }),
+        ).filter(c => c != 'parallelAllocations')
+        throw new Error(
+          `Indexing rule attribute '${error.message}' not supported, did you mean?\n` +
+            stringify(suggestCommands(error.message, valid_commands)).replace(/\n$/, ''),
         )
-        process.exitCode = 1
       }
-
-      const client = await createIndexerManagementClient({ url: config.api })
-      const rule = await setIndexingRule(client, inputRule)
-      printIndexingRules(print, outputFormat, identifier, rule, [])
     } catch (error) {
       print.error(error.toString())
       process.exitCode = 1

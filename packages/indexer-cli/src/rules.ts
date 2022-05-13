@@ -136,8 +136,12 @@ export const parseIndexingRule = (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj = {} as any
   for (const [key, value] of Object.entries(rule)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    obj[key] = (INDEXING_RULE_PARSERS as any)[key](value)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      obj[key] = (INDEXING_RULE_PARSERS as any)[key](value)
+    } catch (error) {
+      throw new Error(key)
+    }
   }
   return obj as Partial<IndexingRuleAttributes>
 }
