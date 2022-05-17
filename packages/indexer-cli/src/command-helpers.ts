@@ -115,5 +115,17 @@ export function printObjectData(
   data: object,
   keys: string[],
 ): void {
+  outputColors(print, outputFormat)
   print.info(displayObjectData(outputFormat, pickFields(data, keys)))
+}
+
+export function outputColors(
+  print: GluegunPrint,
+  outputFormat: 'table' | 'json' | 'yaml',
+): void {
+  if (outputFormat === 'table') {
+    print.colors.enable()
+  } else {
+    print.colors.disable()
+  }
 }
