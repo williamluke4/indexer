@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios'
+import axios, { AxiosInstance, AxiosResponse, AxiosRequestConfig } from 'axios'
 
 import { Logger, Metrics, Eventual } from '@graphprotocol/common-ts'
 import {
@@ -18,6 +18,15 @@ export interface PaidQueryProcessorOptions {
   graphNode: string
   signers: Eventual<AttestationSignerMap>
   receiptManager: ReceiptManager
+}
+
+interface AxiosRequestConfigWithTime extends AxiosRequestConfig {
+  meta?: { requestStartedAt?: number }
+}
+
+interface AxiosResponseWithTime extends AxiosResponse {
+  responseTime?: number
+  config: AxiosRequestConfigWithTime
 }
 
 export class QueryProcessor implements QueryProcessorInterface {
@@ -54,7 +63,7 @@ export class QueryProcessor implements QueryProcessorInterface {
 
     // Set up Axios for request response time measurement
     // https://sabljakovich.medium.com/axios-response-time-capture-and-log-8ff54a02275d
-    this.graphNode.interceptors.request.use(function (x: any) {
+    this.graphNode.interceptors.request.use(function (x: AxiosRequestConfigWithTime) {
       // to avoid overwriting if another interceptor
       // already defined the same object (meta)
       x.meta = x.meta || {}
@@ -62,13 +71,17 @@ export class QueryProcessor implements QueryProcessorInterface {
       return x
     })
     this.graphNode.interceptors.response.use(
-      function (x: any) {
-        x.responseTime = new Date().getTime() - x.config.meta.requestStartedAt
+      function (x: AxiosResponseWithTime) {
+        if (x.config.meta?.requestStartedAt !== undefined) {
+          x.responseTime = new Date().getTime() - x.config.meta?.requestStartedAt
+        }
         return x
       },
       // Handle 4xx & 5xx responses
-      function (x: any) {
-        x.responseTime = new Date().getTime() - x.config.meta.requestStartedAt
+      function (x: AxiosResponseWithTime) {
+        if (x.config.meta?.requestStartedAt !== undefined) {
+          x.responseTime = new Date().getTime() - x.config.meta.requestStartedAt
+        }
         throw x
       },
     )
@@ -134,7 +147,7 @@ export class QueryProcessor implements QueryProcessorInterface {
       deployment: subgraphDeploymentID.ipfsHash,
       fees: parsedReceipt.fees.toBigInt().toString(),
       query: query,
-      responseTime: (response as any).responseTime,
+      responseTime: (response as AxiosResponseWithTime).responseTime ?? null,
     })
 
     return {
