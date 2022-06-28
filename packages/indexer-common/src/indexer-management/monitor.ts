@@ -80,7 +80,11 @@ export class NetworkMonitor {
       const result = await this.networkSubgraph.query(
         gql`
           query allocations($indexer: String!, $status: AllocationStatus!) {
-            allocations(where: { indexer: $indexer, status: $status }, first: 1000) {
+            allocations(
+              where: { indexer: $indexer, status: $status }
+              first: 1000
+              orderBy: createdAtBlockNumber
+            ) {
               id
               indexer {
                 id

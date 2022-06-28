@@ -2,8 +2,11 @@ import {
   Action,
   ActionFilter,
   ActionStatus,
+  AllocationManagementMode,
+  AllocationStatus,
   IndexerManagementModels,
   isActionFailure,
+  NetworkMonitor,
 } from '@graphprotocol/indexer-common'
 import { AllocationManager } from './allocations'
 import { Transaction } from 'sequelize'
@@ -12,13 +15,61 @@ import { Eventual, join, Logger, timer } from '@graphprotocol/common-ts'
 export class ActionManager {
   constructor(
     public allocationManager: AllocationManager,
+    public networkMonitor: NetworkMonitor,
+    private currentEpoch: number,
+    private maxAllocationEpoch: number,
     private logger: Logger,
     private models: IndexerManagementModels,
+    private allocationManagementMode?: AllocationManagementMode,
+    private autoMinBatchSize?: number,
+    private autoMaxWaitTime?: number,
   ) {}
 
+  private async batchReady(
+    approvedActions: Action[],
+    pollingFrequency: number,
+  ): Promise<boolean> {
+    if (approvedActions.length < 1) {
+      return false
+    }
+
+    // In AUTO mode, worker waits to execute when 1) the batch is not filled upto minimum size
+    // and 2) oldest allocatation is not expiring after the current epoch
+    // and 3) oldest action is not stale (10 times the user provided threshold of polling frequency)
+    if (this.allocationManagementMode === AllocationManagementMode.AUTO) {
+      const oldestCreatedAtEpoch = (
+        await this.networkMonitor.allocations(AllocationStatus.ACTIVE)
+      )[0].createdAtEpoch
+
+      const updatedDeadline = new Date(new Date().valueOf() - 10 * pollingFrequency)
+
+      this.logger.debug('Worker in AUTO, checking batch conditions', {
+        length: approvedActions.length,
+        lengthRequirement: this.autoMinBatchSize ? this.autoMinBatchSize : 1,
+        oldestCreatedAtEpoch: oldestCreatedAtEpoch,
+        epochRequirement: this.currentEpoch - this.maxAllocationEpoch,
+        oldestUpdate: approvedActions.slice(-1)[0].updatedAt,
+        updateRequirement: updatedDeadline,
+      })
+
+      return !(
+        approvedActions.length < (this.autoMinBatchSize ? this.autoMinBatchSize : 1) &&
+        this.currentEpoch <= oldestCreatedAtEpoch + this.maxAllocationEpoch &&
+        updatedDeadline <= approvedActions.slice(-1)[0].updatedAt
+      )
+    }
+
+    return true
+  }
+
   async monitorQueue(): Promise<void> {
-    const approvedActions: Eventual<Action[]> = timer(30_000).tryMap(
-      async () => await this.fetchActions({ status: ActionStatus.APPROVED }),
+    const pollingFrequency = 1000 * 60 * (this.autoMaxWaitTime ? this.autoMaxWaitTime : 1)
+
+    const approvedActions: Eventual<Action[]> = timer(pollingFrequency).tryMap(
+      async () =>
+        await this.models.Action.findAll({
+          where: { status: ActionStatus.APPROVED },
+        }),
       {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onError: (err: any) =>
@@ -27,7 +78,7 @@ export class ActionManager {
     )
 
     join({ approvedActions }).pipe(async ({ approvedActions }) => {
-      if (approvedActions.length >= 1) {
+      if (await this.batchReady(approvedActions, pollingFrequency)) {
         this.logger.info('Executing batch of approved actions', {
           actions: approvedActions,
           note: 'If actions were approved very recently they may be missing from this list but will still be taken',
@@ -38,6 +89,10 @@ export class ActionManager {
         this.logger.trace('Attempted to execute all approved actions', {
           actions: attemptedActions,
         })
+      } else {
+        this.logger.debug(
+          'Worker waiting for the current batch to be ready, simply monitor the queue for now',
+        )
       }
     })
   }
@@ -49,11 +104,20 @@ export class ActionManager {
     await this.models.Action.sequelize!.transaction(
       { isolationLevel: Transaction.ISOLATION_LEVELS.SERIALIZABLE },
       async (transaction) => {
-        // Execute already approved actions first
-        const approvedActions = await this.models.Action.findAll({
-          where: { status: ActionStatus.APPROVED },
-          transaction,
-          lock: transaction.LOCK.UPDATE,
+        // Execute already approved actions in the order of type and priority
+        const actionTypePriority = ['unallocate', 'reallocate', 'allocate']
+        const approvedActions = (
+          await this.models.Action.findAll({
+            where: { status: ActionStatus.APPROVED },
+            order: [
+              // ['type', 'DESC'],
+              ['priority', 'ASC'],
+            ],
+            transaction,
+            lock: transaction.LOCK.UPDATE,
+          })
+        ).sort(function (a, b) {
+          return actionTypePriority.indexOf(a.type) - actionTypePriority.indexOf(b.type)
         })
 
         try {
